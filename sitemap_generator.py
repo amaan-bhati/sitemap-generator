@@ -84,12 +84,12 @@ class SitemapGenerator:
         
         return links
     
-    async def crawl(self, max_concurrent=5):
-        """Crawl website asynchronously"""
-        queue = asyncio.Queue()
-        await queue.put(self.start_url)
+    async def crawl(self, max_concurrent=5): 
+        """Crawl website asynchronousl, max concurrent means the number of conccuret urls, 10 means crawl 10 urls at the same time"""
+        queue = asyncio.Queue()    # Queue of URLs to crawl
+        await queue.put(self.start_url) 
         
-        semaphore = asyncio.Semaphore(max_concurrent)
+        semaphore = asyncio.Semaphore(max_concurrent) # Limit to 5 simultaneous requests
         
         async def worker(session):
             while True:
@@ -98,19 +98,21 @@ class SitemapGenerator:
                 except asyncio.QueueEmpty:
                     break
                 
-                if url in self.visited:
+                if url in self.visited: # Already crawled, skip
                     continue
                 
-                self.visited.add(url)
+                self.visited.add(url) # Mark as visited
+
                 print(f"Crawling: {url} ({len(self.visited)} URLs found)")
                 
                 async with semaphore:
-                    html = await self.fetch_url(session, url)
+                    html = await self.fetch_url(session, url) # Fetch page (async = non-blocking)
                     
                     if html:
+                             # Extract all links and add to queue
                         self.urls_data[url] = {
-                            'lastmod': datetime.now().isoformat()[:10],
-                            'priority': self.get_priority(url)
+                            'lastmod': datetime.now().isoformat()[:10],   # Last modified date
+                            'priority': self.get_priority(url)  # Priority score
                         }
                         
                         links = await self.extract_links(html, url)
@@ -160,7 +162,7 @@ class SitemapGenerator:
     
     def compare_with_previous(self, previous_json_path):
         """Compare with previous sitemap and return changes"""
-        if not os.path.exists(previous_json_path):
+        if not os.path.exists(previous_json_path):    # Read the OLD sitemap
             return {
                 'new_urls': list(self.urls_data.keys()),
                 'removed_urls': [],
@@ -170,14 +172,14 @@ class SitemapGenerator:
         with open(previous_json_path, 'r') as f:
             previous = json.load(f)
         
-        previous_urls = set(previous['urls'].keys())
-        current_urls = set(self.urls_data.keys())
-        
+        previous_urls = set(previous['urls'].keys())   # Read the OLD sitemap
+        current_urls = set(self.urls_data.keys()) # Get the NEW urls
+           # Calculate differences
         return {
-            'new_urls': list(current_urls - previous_urls),
-            'removed_urls': list(previous_urls - current_urls),
-            'updated_urls': list(current_urls & previous_urls),
-            'url_count_change': len(current_urls) - len(previous_urls)
+            'new_urls': list(current_urls - previous_urls),  # URLs in current, not in previous
+            'removed_urls': list(previous_urls - current_urls), # URLs in previous, not in current
+            'updated_urls': list(current_urls & previous_urls),  # URLs in both (same URLs)
+            'url_count_change': len(current_urls) - len(previous_urls) # Change in URL count
         }
     
     def save_sitemaps(self, output_dir='sitemaps'):
