@@ -12,16 +12,16 @@ The script crawls a website, discovers all URLs, generates an XML sitemap, and t
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│  START: https://keploy.io                                  │
+│  START: https://keploy.io                                   │
 │         ↓                                                   │
-│  1. Fetch the page HTML                                    │
-│  2. Extract all <a href> links                             │
-│  3. Add new links to "Queue"                               │
-│  4. Mark current URL as "Visited"                          │
-│  5. Pick next URL from Queue                               │
-│  6. Repeat until Queue is empty                            │
+│  1. Fetch the page HTML                                     │
+│  2. Extract all <a href> links                              │
+│  3. Add new links to "Queue"                                │
+│  4. Mark current URL as "Visited"                           │
+│  5. Pick next URL from Queue                                │
+│  6. Repeat until Queue is empty                             │
 │         ↓                                                   │
-│  DONE: Have all URLs                                       │
+│  DONE: Have all URLs                                        │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
