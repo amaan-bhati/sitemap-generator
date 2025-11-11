@@ -9,104 +9,41 @@ from collections import defaultdict
 import os
 import sys
 
-
 class SitemapGenerator:
-    """
-    Website crawler that generates XML/JSON sitemaps with proper URL normalization.
-    """
-    
     def __init__(self, start_url, domain):
-        """Initialize crawler with configuration."""
         self.start_url = start_url
         self.domain = domain
         self.visited = set()
         self.urls_data = defaultdict(lambda: {'lastmod': None, 'priority': 0.5})
+        self.excluded_patterns = ['.pdf', '.jpg', '.png', '.gif', '.zip', '/search', '/login']
         
-        # Updated: Added .svg and other file types
-        self.excluded_patterns = [
-            '.pdf', '.jpg', '.png', '.gif', '.zip',  # File types
-            '.svg',                                    # SVG files (NEW)
-            '.webp', '.ico', '.ttf', '.woff',        # Other file types
-            '.jpeg', '.mp4', '.mp3', '.mov',         # Media files
-            '/search', '/login', '/admin'            # URL patterns
-        ]
-    
-    def normalize_url(self, url):
-        """
-        Normalize URL by removing fragments, query parameters, and trailing slashes.
-        
-        This ensures:
-        - docs/glossary#section1 and docs/glossary#section2 are same URL
-        - utm_source=twitter doesn't create duplicate
-        - Consistent URL format throughout
-        
-        Examples:
-            https://keploy.io/docs/glossary#section1 → https://keploy.io/docs/glossary
-            https://keploy.io/docs/glossary?utm_source=x → https://keploy.io/docs/glossary
-            https://keploy.io/docs/glossary/ → https://keploy.io/docs/glossary
-        
-        Args:
-            url (str): URL to normalize
-            
-        Returns:
-            str: Normalized URL
-        """
-        # Remove fragments (everything after #)
-        if '#' in url:
-            url = url.split('#')[0]
-        
-        # Remove query parameters (everything after ?)
-        if '?' in url:
-            url = url.split('?')[0]
-        
-        # Remove trailing slash for consistency
-        url = url.rstrip('/')
-        
-        return url
-    
     def should_crawl(self, url):
-        """
-        Determine if a URL should be crawled.
-        
-        Filters by:
-        1. Domain (stay within allowed domain)
-        2. Excluded patterns (skip files, login pages, etc.)
-        
-        Args:
-            url (str): URL to check
-            
-        Returns:
-            bool: True if should crawl, False otherwise
-        """
-        # FIRST: Normalize the URL (removes fragments, params, slashes)
-        url = self.normalize_url(url)
-        
-        # Parse URL components
+        """Check if URL should be crawled"""
         parsed = urlparse(url)
         
-        # FILTER 1: Domain Check
-        # Only crawl URLs from the same domain
+        # Skip if not same domain
         if parsed.netloc != urlparse(self.domain).netloc:
             return False
-        
-        # FILTER 2: Excluded Patterns
-        # Skip PDFs, images, SVGs, login pages, etc.
+            
+        # Skip excluded patterns
         for pattern in self.excluded_patterns:
             if pattern in url.lower():
                 return False
-        
+                
+        # Skip fragments but allow query params if necessary
+        if '#' in url:
+            url = url.split('#')[0]  # Remove fragment
+            
+        # Optional: Skip certain query params (like tracking params)
+        if '?' in url:
+            # Remove tracking params but keep structural ones
+            if any(x in url for x in ['utm_', 'fbclid', 'gclid']):
+                return False
+            
         return True
     
     def get_priority(self, url):
-        """
-        Assign priority score to URL based on its path.
-        
-        Args:
-            url (str): URL to score
-            
-        Returns:
-            float: Priority between 0.0 and 1.0
-        """
+        """Determine priority based on URL structure"""
         path = urlparse(url).path.lower()
         
         if path in ['/', ''] or path == self.domain:
@@ -121,122 +58,74 @@ class SitemapGenerator:
             return 0.7
     
     async def fetch_url(self, session, url):
-        """
-        Fetch HTML content of a URL asynchronously.
-        
-        Args:
-            session (aiohttp.ClientSession): HTTP session
-            url (str): URL to fetch
-            
-        Returns:
-            str: HTML content or None if failed
-        """
+        """Fetch URL with timeout"""
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10), ssl=False) as response:
                 if response.status == 200 and 'text/html' in response.headers.get('content-type', ''):
                     return await response.text()
         except:
             pass
-        
         return None
     
     async def extract_links(self, html, current_url):
-        """
-        Extract all links from HTML and normalize them.
-        
-        Args:
-            html (str): HTML content
-            current_url (str): Current page URL (for relative→absolute conversion)
-            
-        Returns:
-            set: Set of normalized absolute URLs
-        """
+        """Extract all links from HTML"""
         links = set()
-        
         try:
             soup = BeautifulSoup(html, 'html.parser')
             
             for tag in soup.find_all(['a', 'link']):
                 href = tag.get('href', '').strip()
-                
                 if href:
-                    # Convert relative URL to absolute
                     absolute_url = urljoin(current_url, href)
-                    
-                    # NORMALIZE BEFORE CHECKING - this is KEY!
-                    normalized_url = self.normalize_url(absolute_url)
-                    
-                    # Check if should crawl (domain + patterns)
-                    if self.should_crawl(normalized_url):
-                        links.add(normalized_url)
+                    if self.should_crawl(absolute_url):
+                        links.add(absolute_url)
         except:
             pass
         
         return links
     
-    async def crawl(self, max_concurrent=5):
-        """
-        Main crawling function. Fetches all URLs asynchronously.
-        
-        Args:
-            max_concurrent (int): Number of simultaneous requests
-        """
+    async def crawl(self, max_concurrent=5): 
+        """Crawl website asynchronousl"""
         queue = asyncio.Queue()
-        
-        # Normalize starting URL
-        start_url = self.normalize_url(self.start_url)
-        await queue.put(start_url)
+        await queue.put(self.start_url)
         
         semaphore = asyncio.Semaphore(max_concurrent)
         
         async def worker(session):
-            """Worker that processes URLs from queue."""
             while True:
                 try:
                     url = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
                 
-                # Normalize URL (defensive - should already be normalized)
-                url = self.normalize_url(url)
-                
-                # Skip if already visited
                 if url in self.visited:
                     continue
                 
-                # Mark as visited
                 self.visited.add(url)
-                
                 print(f"Crawling: {url} ({len(self.visited)} URLs found)")
                 
                 async with semaphore:
                     html = await self.fetch_url(session, url)
                     
                     if html:
-                        # Store normalized URL data
                         self.urls_data[url] = {
                             'lastmod': datetime.now().isoformat()[:10],
                             'priority': self.get_priority(url)
                         }
                         
-                        # Extract links from this page
                         links = await self.extract_links(html, url)
-                        
-                        # Add new links to queue (all pre-normalized)
                         for link in links:
                             if link not in self.visited:
                                 await queue.put(link)
         
-        # Create TCP connector with limit
         connector = aiohttp.TCPConnector(limit=max_concurrent)
-        
-        # Run workers
         async with aiohttp.ClientSession(connector=connector) as session:
             workers = [worker(session) for _ in range(max_concurrent)]
             await asyncio.gather(*workers)
     
     def generate_xml_sitemap(self):
-        """Generate XML sitemap from crawled URLs."""
+        """Generate XML sitemap with proper formatting"""
+        # Register namespaces
         ET.register_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
         
         root = ET.Element('urlset')
@@ -256,13 +145,13 @@ class SitemapGenerator:
             priority = ET.SubElement(url_elem, 'priority')
             priority.text = f"{self.urls_data[url]['priority']:.2f}"
         
+        # Build XML string with declaration
         xml_str = ET.tostring(root, encoding='unicode')
         xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        
         return xml_declaration + xml_str
     
     def generate_json_sitemap(self):
-        """Generate JSON version of sitemap."""
+        """Generate JSON sitemap for tracking"""
         return json.dumps({
             'generated_at': datetime.now().isoformat(),
             'total_urls': len(self.urls_data),
@@ -270,7 +159,7 @@ class SitemapGenerator:
         }, indent=2)
     
     def compare_with_previous(self, previous_json_path):
-        """Compare current sitemap with previous one."""
+        """Compare with previous sitemap and return changes"""
         if not os.path.exists(previous_json_path):
             return {
                 'new_urls': list(self.urls_data.keys()),
@@ -284,38 +173,31 @@ class SitemapGenerator:
         previous_urls = set(previous['urls'].keys())
         current_urls = set(self.urls_data.keys())
         
-        new_urls = current_urls - previous_urls
-        removed_urls = previous_urls - current_urls
-        updated_urls = current_urls & previous_urls
-        url_count_change = len(current_urls) - len(previous_urls)
-        
         return {
-            'new_urls': list(new_urls),
-            'removed_urls': list(removed_urls),
-            'updated_urls': list(updated_urls),
-            'url_count_change': url_count_change
+            'new_urls': list(current_urls - previous_urls),
+            'removed_urls': list(previous_urls - current_urls),
+            'updated_urls': list(current_urls & previous_urls),
+            'url_count_change': len(current_urls) - len(previous_urls)
         }
     
     def save_sitemaps(self, output_dir='sitemaps'):
-        """Save generated sitemaps to files."""
+        """Save XML and JSON sitemaps"""
         os.makedirs(output_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Save XML
+        # Save XML sitemap
         xml_path = os.path.join(output_dir, 'sitemap.xml')
         with open(xml_path, 'w') as f:
             f.write(self.generate_xml_sitemap())
         
-        # Save JSON
+        # Save JSON sitemap
         json_path = os.path.join(output_dir, f'sitemap_{timestamp}.json')
         with open(json_path, 'w') as f:
             f.write(self.generate_json_sitemap())
         
-        # Compare and save changes
-        previous_json = sorted([f for f in os.listdir(output_dir) 
-                               if f.startswith('sitemap_') and f.endswith('.json')])
-        
+        # Compare with previous and save changes
+        previous_json = sorted([f for f in os.listdir(output_dir) if f.startswith('sitemap_') and f.endswith('.json')])
         if len(previous_json) > 1:
             previous_path = os.path.join(output_dir, previous_json[-2])
             changes = self.compare_with_previous(previous_path)
@@ -338,7 +220,7 @@ class SitemapGenerator:
 
 
 async def main():
-    """Main entry point."""
+    # Configuration
     START_URL = 'https://keploy.io'
     DOMAIN = 'https://keploy.io'
     OUTPUT_DIR = 'sitemaps'
@@ -348,6 +230,7 @@ async def main():
     
     generator = SitemapGenerator(START_URL, DOMAIN)
     await generator.crawl(max_concurrent=10)
+    
     generator.save_sitemaps(OUTPUT_DIR)
     
     print("\n✨ Sitemap generation complete!")
