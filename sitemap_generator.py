@@ -12,7 +12,8 @@ import sys
 
 class SitemapGenerator:
     """
-    Website crawler that generates XML/JSON sitemaps with proper URL normalization.
+    Website crawler that generates XML/JSON sitemaps with proper URL normalization
+    and hierarchical priority assignment.
     """
     
     def __init__(self, start_url, domain):
@@ -25,7 +26,7 @@ class SitemapGenerator:
         # Updated: Added .svg and other file types
         self.excluded_patterns = [
             '.pdf', '.jpg', '.png', '.gif', '.zip',  # File types
-            '.svg',                                    # SVG files (NEW)
+            '.svg',                                    # SVG files
             '.webp', '.ico', '.ttf', '.woff',        # Other file types
             '.jpeg', '.mp4', '.mp3', '.mov',         # Media files
             '/search', '/login', '/admin'            # URL patterns
@@ -35,33 +36,16 @@ class SitemapGenerator:
         """
         Normalize URL by removing fragments, query parameters, and trailing slashes.
         
-        This ensures:
-        - docs/glossary#section1 and docs/glossary#section2 are same URL
-        - utm_source=twitter doesn't create duplicate
-        - Consistent URL format throughout
-        
         Examples:
             https://keploy.io/docs/glossary#section1 → https://keploy.io/docs/glossary
             https://keploy.io/docs/glossary?utm_source=x → https://keploy.io/docs/glossary
             https://keploy.io/docs/glossary/ → https://keploy.io/docs/glossary
-        
-        Args:
-            url (str): URL to normalize
-            
-        Returns:
-            str: Normalized URL
         """
-        # Remove fragments (everything after #)
         if '#' in url:
             url = url.split('#')[0]
-        
-        # Remove query parameters (everything after ?)
         if '?' in url:
             url = url.split('?')[0]
-        
-        # Remove trailing slash for consistency
         url = url.rstrip('/')
-        
         return url
     
     def should_crawl(self, url):
@@ -71,26 +55,18 @@ class SitemapGenerator:
         Filters by:
         1. Domain (stay within allowed domain)
         2. Excluded patterns (skip files, login pages, etc.)
-        
-        Args:
-            url (str): URL to check
-            
-        Returns:
-            bool: True if should crawl, False otherwise
         """
-        # FIRST: Normalize the URL (removes fragments, params, slashes)
+        # FIRST: Normalize the URL
         url = self.normalize_url(url)
         
         # Parse URL components
         parsed = urlparse(url)
         
         # FILTER 1: Domain Check
-        # Only crawl URLs from the same domain
         if parsed.netloc != urlparse(self.domain).netloc:
             return False
         
         # FILTER 2: Excluded Patterns
-        # Skip PDFs, images, SVGs, login pages, etc.
         for pattern in self.excluded_patterns:
             if pattern in url.lower():
                 return False
@@ -99,7 +75,14 @@ class SitemapGenerator:
     
     def get_priority(self, url):
         """
-        Assign priority score to URL based on its path.
+        Assign priority score to URL based on hierarchical content importance.
+        
+        Priority Tiers:
+        1.00 - Homepage, main landing pages (/, /docs/, /blog)
+        0.80 - Product pages, main blog categories, core how-to guides
+        0.64 - Quickstarts, installation guides, blog tags, SDK docs
+        0.51 - Concept pages, deep guides, blog posts, versioned docs
+        0.41 - Old versioned docs (1.0.0), deep nested glossaries
         
         Args:
             url (str): URL to score
@@ -109,16 +92,101 @@ class SitemapGenerator:
         """
         path = urlparse(url).path.lower()
         
+        # ========== TIER 1: HOMEPAGE & MAIN SECTIONS (1.00) ==========
+        # Entry points and critical landing pages
         if path in ['/', ''] or path == self.domain:
             return 1.0
-        elif '/docs' in path:
-            return 0.9
-        elif '/blog' in path:
-            return 0.8
-        elif '/product' in path or '/features' in path:
-            return 0.85
-        else:
-            return 0.7
+        if path in ['/docs', '/docs/', '/blog', '/blog/']:
+            return 1.0
+        if '/gittogether' in path:
+            return 1.0
+        
+        # ========== TIER 2A: PRODUCT & CATEGORY PAGES (0.80) ==========
+        
+        # Product/Feature pages (conversion-focused)
+        if any(x in path for x in ['/pricing', '/api-testing', '/integration-testing', 
+                                    '/unit-test-generator', '/contract-testing', 
+                                    '/ai-code-generation', '/test-case-generator',
+                                    '/test-data-generator', '/code-coverage',
+                                    '/continuous-integration-testing', '/devscribe']):
+            return 0.80
+        
+        # Main blog categories (not individual posts, not tags)
+        if path in ['/blog/technology', '/blog/community'] or \
+           (path.startswith('/blog/') and path.count('/') == 2):
+            return 0.80
+        
+        # Core documentation guides (how-to, running, CI/CD, dependencies)
+        if any(x in path for x in ['/docs/running-keploy/', '/docs/ci-cd/', 
+                                    '/docs/dependencies/', '/docs/keploy-cloud/',
+                                    '/docs/security']):
+            return 0.80
+        
+        # ========== TIER 2B: QUICKSTARTS, INSTALLATIONS, BLOG TAGS (0.64) ==========
+        
+        # Quickstart tutorials (high learning value)
+        if '/docs/quickstart/' in path:
+            return 0.64
+        
+        # SDK and server installation guides
+        if '/docs/server/installation/' in path or \
+           '/docs/server/sdk-installation/' in path:
+            return 0.64
+        
+        # Blog tags (category pages, not individual posts)
+        if '/blog/tag/' in path:
+            return 0.64
+        
+        # ========== TIER 3: CONCEPT PAGES, DEEP GUIDES, BLOG POSTS (0.51) ==========
+        
+        # Core concept explanations
+        if '/docs/concepts/' in path and '/docs/1.0.0' not in path:
+            return 0.51
+        
+        # Detailed keploy explanations and guides
+        if '/docs/keploy-explained/' in path and '/docs/1.0.0' not in path:
+            return 0.51
+        
+        # Operation guides (not versioned)
+        if '/docs/operation/' in path and '/docs/1.0.0' not in path:
+            return 0.51
+        
+        # Application development guides
+        if '/docs/application-development/' in path:
+            return 0.51
+        
+        # Individual blog posts (technology or community)
+        if ('/blog/technology/' in path or '/blog/community/' in path) and \
+           '/blog/tag/' not in path:
+            return 0.51
+        
+        # Current version docs (not /1.0.0/)
+        if '/docs/' in path and '/docs/1.0.0' not in path and \
+           not any(x in path for x in ['/blog', '/pricing', '/api-testing', 
+                                       '/integration-testing', '/unit-test-generator']):
+            return 0.51
+        
+        # ========== TIER 4: OLD VERSIONED DOCS, DEEP NESTED PAGES (0.41) ==========
+        
+        # Old versioned documentation (/1.0.0/ should be lower priority)
+        if '/docs/1.0.0/' in path:
+            # Even lower priority for glossaries and references in old docs
+            if '/glossary/' in path or '/reference/' in path or '/tags/' in path:
+                return 0.41
+            else:
+                return 0.51  # Slightly higher for old SDK docs
+        
+        # Documentation tag pages (collection pages)
+        if '/docs/tags/' in path or '/docs/1.0.0/tags/' in path:
+            return 0.41
+        
+        # Very deep nested pages (4+ segments after /docs)
+        if path.count('/') > 5:
+            return 0.41
+        
+        # ========== DEFAULT: STANDARD PAGES (0.51) ==========
+        # Catch-all for other pages like /about, /privacy-policy, etc.
+        return 0.51
     
     async def fetch_url(self, session, url):
         """
@@ -213,7 +281,7 @@ class SitemapGenerator:
                     html = await self.fetch_url(session, url)
                     
                     if html:
-                        # Store normalized URL data
+                        # Store normalized URL data with proper priority
                         self.urls_data[url] = {
                             'lastmod': datetime.now().isoformat()[:10],
                             'priority': self.get_priority(url)
