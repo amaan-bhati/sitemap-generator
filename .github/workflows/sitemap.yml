@@ -1,0 +1,66 @@
+name: Generate Sitemap
+
+on:
+  schedule:
+    # Run every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  generate-sitemap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp beautifulsoup4 lxml
+      
+      - name: Create sitemaps directory
+        run: mkdir -p sitemaps
+      
+      - name: Generate sitemap
+        run: python sitemap_generator.py
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add sitemaps/
+          git commit -m "🤖 Auto-generated sitemap - $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          git push
+      
+      - name: Upload sitemap as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitemaps
+          path: sitemaps/
+          retention-days: 30
+      
+      - name: Create GitHub Release with sitemap
+        if: always()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: sitemap-${{ github.run_number }}
+          name: Sitemap Generation Run #${{ github.run_number }}
+          body: |
+            Automated sitemap generation run
+            Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
