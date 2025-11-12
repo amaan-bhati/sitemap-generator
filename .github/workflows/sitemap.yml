@@ -40,6 +40,14 @@ jobs:
           git commit -m "🤖 Auto-generated sitemap - $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
           git push
       
+      - name: Upload sitemap as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitemaps
+          path: sitemaps/
+          retention-days: 30
+      
       - name: Create GitHub Release with sitemap
         if: always()
         uses: actions/create-release@v1
@@ -53,10 +61,3 @@ jobs:
             Generated at: ${{ github.event.head_commit.timestamp }}
           draft: false
           prerelease: false
-      
-      - name: Upload sitemap as artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: sitemaps
-          path: sitemaps/
-          retention-days: 30
