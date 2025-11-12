@@ -9,6 +9,9 @@ on:
 jobs:
   generate-sitemap:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     
     steps:
       - name: Checkout repository
@@ -50,14 +53,14 @@ jobs:
       
       - name: Create GitHub Release with sitemap
         if: always()
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: sitemap-${{ github.run_number }}
-          release_name: Sitemap Generation Run #${{ github.run_number }}
+          name: Sitemap Generation Run #${{ github.run_number }}
           body: |
             Automated sitemap generation run
-            Generated at: ${{ github.event.head_commit.timestamp }}
+            Generated at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
